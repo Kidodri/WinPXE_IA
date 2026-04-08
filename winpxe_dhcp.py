@@ -79,9 +79,9 @@ class WinPXEDHCPD(DHCPD):
             # On utilise le format PXE standard pour le ProxyDHCP
 
             # Sub-option 6: Discovery Control (8 = Disable Broadcast Discovery)
-            # Sub-option 71: Boot Item (Type 0, Layer 1)
+            # Sub-option 71: Boot Item (Type 0, Layer 0)
 
-            opt43 = struct.pack('!BBB BBBHBB B',
+            opt43 = struct.pack('!BBB BBHBB B',
                 6, 1, 8,            # Discovery Control
                 71, 4, 0, 0, 0, 0,  # Boot Item (Type 0, Layer 0)
                 255)                # End
