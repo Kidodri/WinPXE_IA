@@ -28,10 +28,15 @@ Ce projet implémente un serveur PXE fonctionnel sur **Windows**, configuré en 
 
 ## Utilisation
 
-### 1. Préparation des fichiers de boot
-Placez vos chargeurs d'amorçage dans le dossier `netboot/` :
-- `ipxe.efi` (pour les machines UEFI)
-- `undionly.kpxe` (pour les machines BIOS Legacy)
+### 1. Téléchargement automatique des chargeurs d'amorçage
+Au lieu de chercher manuellement les fichiers iPXE, vous pouvez utiliser le script de configuration inclus :
+```bash
+python setup_netboot.py
+```
+Ce script va :
+- Créer le dossier `netboot/`.
+- Télécharger `ipxe.efi` (pour UEFI x64) et `undionly.kpxe` (pour BIOS Legacy) depuis le site officiel iPXE.
+- Créer un fichier d'exemple `boot.ipxe` que vous pourrez personnaliser pour lancer vos images ISO ou installer Windows.
 
 ### 2. Configuration
 Ouvrez `server.py` et adaptez la variable `SERVER_IP` avec l'adresse IP de votre machine Windows :

@@ -57,8 +57,17 @@ class WinPXEDHCPD(DHCPD):
         if 93 in self.options[client_mac]:
             [arch] = struct.unpack("!H", self.options[client_mac][93][0])
 
+        # Détection iPXE (Option 77) pour éviter la boucle infinie
+        is_ipxe = False
+        if 77 in self.options[client_mac]:
+            if b'iPXE' in self.options[client_mac][77][0]:
+                is_ipxe = True
+
         # Choix du fichier de boot
-        if arch in [7, 9]: # UEFI x64
+        if is_ipxe:
+            # Si c'est déjà iPXE, on envoie le script de config
+            filename = "boot.ipxe"
+        elif arch in [7, 9]: # UEFI x64
             filename = "ipxe.efi"
         elif arch == 6: # UEFI x86
             filename = "ipxe_ia32.efi"
