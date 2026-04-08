@@ -90,9 +90,15 @@ class WinPXEDHCPD(DHCPD):
             # Sub-option 6: Discovery Control (8 = Disable Broadcast Discovery)
             # Sub-option 71: Boot Item (Type 0, Layer 0)
 
-            opt43 = struct.pack('!BBB BBHBB B',
+            # Format:
+            # Sub-option 6: Tag(B), Len(B), Val(B) -> 3 items
+            # Sub-option 71: Tag(B), Len(B), Type(H), Index(H) -> 4 items
+            # End: Tag(B) -> 1 item
+            # Total expected items: 8
+
+            opt43 = struct.pack('!BBB BBH H B',
                 6, 1, 8,            # Discovery Control
-                71, 4, 0, 0, 0, 0,  # Boot Item (Type 0, Layer 0)
+                71, 4, 0, 0,        # Boot Item (Type 0, Index 0)
                 255)                # End
 
             response += self.tlv_encode(43, opt43)
