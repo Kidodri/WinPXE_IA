@@ -11,7 +11,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(na
 logger = logging.getLogger('WinPXE-Server')
 
 # Configuration du serveur
-SERVER_IP = '192.168.100.223'  # À ADAPTER à l'IP de votre machine
+SERVER_IP = '192.168.1.100'  # À ADAPTER à l'IP de votre machine
 NETBOOT_DIR = 'netboot'      # Dossier contenant les fichiers de boot (ipxe.efi, etc.)
 
 # Création du dossier netboot s'il n'existe pas

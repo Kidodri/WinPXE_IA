@@ -1,6 +1,6 @@
 import socket
 import struct
-from scapy.all import Ethernet, IP, UDP, BOOTP, DHCP, sendp, get_if_hwaddr, conf
+from scapy.all import Ether, IP, UDP, BOOTP, DHCP, sendp, get_if_hwaddr, conf
 from pypxe.dhcp import DHCPD
 
 class WinPXEDHCPD(DHCPD):
