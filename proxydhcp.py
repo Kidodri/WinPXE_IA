@@ -7,6 +7,7 @@ class ProxyDHCP:
         self.server_ip = server_ip
         self.boot_file = boot_file
         self.running = False
+        self.pxe_clients = set() # Track MACs that have identified as PXE
 
     def handle_dhcp(self, pkt):
         if DHCP not in pkt:
@@ -25,6 +26,7 @@ class ProxyDHCP:
             return
 
         # Check for PXEClient or iPXE
+        client_mac = pkt[Ether].src
         is_pxe = False
         vendor_class = dhcp_options.get('vendor_class_id')
         if vendor_class:
@@ -33,12 +35,16 @@ class ProxyDHCP:
             elif isinstance(vendor_class, str) and 'PXEClient' in vendor_class:
                 is_pxe = True
 
+        if is_pxe:
+            self.pxe_clients.add(client_mac)
+
         is_ipxe = False
         if 77 in dhcp_options and b'iPXE' in dhcp_options[77]:
             is_ipxe = True
 
         # In ProxyDHCP mode, we ONLY respond to PXEClient requests
-        if not is_pxe:
+        # We also check our pxe_clients set in case the REQUEST omits Option 60
+        if not is_pxe and client_mac not in self.pxe_clients:
             return
 
         boot_file = self.boot_file
