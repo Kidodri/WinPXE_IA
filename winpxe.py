@@ -1,13 +1,63 @@
 import os
 import sys
 import time
+import subprocess
+import logging
 from interface_selector import select_interface
 from proxydhcp import ProxyDHCP
 from tftp_server import TFTPServer
 from http_server import HTTPServer, generate_ipxe_menu
+from iso_processor import ISOProcessor
+
+# Setup Logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+    datefmt='%H:%M:%S'
+)
+logger = logging.getLogger("WinPXE-Server")
+
+def is_admin():
+    try:
+        import ctypes
+        return ctypes.windll.shell32.IsUserAnAdmin() != 0
+    except:
+        # Fallback for non-windows (though this app is windows-centric)
+        return os.getuid() == 0 if hasattr(os, 'getuid') else False
+
+def setup_smb_share(iso_dir):
+    share_name = "WinPXE_ISOs"
+    abs_path = os.path.abspath(iso_dir)
+
+    logger.info(f"Setting up SMB share for {abs_path}...")
+
+    # Try to remove existing share first (just in case)
+    subprocess.run(["net", "share", share_name, "/delete"], capture_output=True)
+
+    # Create the share
+    # /grant:Everyone,READ gives read permission to everyone
+    # Use quotes around the path for safety
+    result = subprocess.run(["net", "share", f"{share_name}=\"{abs_path}\"", "/grant:Everyone,READ"], capture_output=True, text=True)
+
+    if result.returncode == 0:
+        logger.info(f"SMB Share '{share_name}' created successfully.")
+        return True
+    else:
+        logger.error(f"Failed to create SMB share: {result.stderr.strip()}")
+        # Check if it failed because it already exists (if delete failed for some reason)
+        if "already shared" in result.stderr:
+             logger.info(f"SMB Share '{share_name}' already exists.")
+             return True
+        return False
 
 def main():
-    print("=== WinPXE Python Server ===")
+    logger.info("=== WinPXE Python Server ===")
+
+    if not is_admin():
+        logger.error("!!! FATAL ERROR: WinPXE must be run as Administrator !!!")
+        logger.error("Raw socket operations and SMB sharing require elevated privileges.")
+        input("Press Enter to exit...")
+        sys.exit(1)
 
     # 1. Check for bootloaders
     import setup_bootloaders
@@ -21,42 +71,41 @@ def main():
     server_ip = iface['ip']
     interface_name = iface['name']
 
-    # 3. Generate iPXE Menu
+    # 3. Process ISOs
     iso_dir = "isos"
     if not os.path.exists(iso_dir):
         os.makedirs(iso_dir)
 
+    processor = ISOProcessor(iso_dir=iso_dir)
+    processor.process_all()
+
+    # 4. Setup SMB Share
+    setup_smb_share(iso_dir)
+
+    # 5. Generate iPXE Menu
     generate_ipxe_menu(iso_dir, server_ip, 80)
 
-    # 4. Start Servers
-    # We'll use a slightly modified boot file name for the ProxyDHCP to chainload iPXE correctly
-    # iPXE first loads ipxe.efi via TFTP.
-    # Then ipxe.efi sends another DHCP request (with Option 77 = "iPXE").
-    # We must detect this and send it the boot.ipxe script via HTTP instead.
-
-    # Wait, pypxe's TFTP and HTTP are simple.
-    # Let's refine the ProxyDHCP logic to handle the iPXE chainloading.
-
+    # 6. Start Servers
     tftp = TFTPServer(server_ip)
-    # The HTTP server serves the current directory to allow access to /isos and /netboot
-    # This is required for iPXE to find boot.ipxe and the ISO files.
     http = HTTPServer("0.0.0.0", 80, ".")
     pdhcp = ProxyDHCP(interface_name, server_ip, "ipxe.efi")
 
     tftp.start()
     http.start()
 
-    print("\nServices are running!")
-    print(f"Server IP: {server_ip}")
-    print(f"ISO Directory: {os.path.abspath(iso_dir)}")
-    print("Press Ctrl+C to stop the server.\n")
+    logger.info("=== Services are running! ===")
+    logger.info(f"Server IP: {server_ip}")
+    logger.info(f"ISO Directory: {os.path.abspath(iso_dir)}")
+    logger.info(f"SMB Share Path: \\\\{server_ip}\\WinPXE_ISOs")
+    logger.info("Ready for client connections. Press Ctrl+C to stop.")
 
     try:
         pdhcp.start() # This is blocking
     except KeyboardInterrupt:
-        print("\nShutting down...")
+        logger.info("Shutting down...")
         pdhcp.stop()
-        # Other threads are daemonized and will exit with main
+        # Clean up share on exit (optional, but good practice)
+        subprocess.run(["net", "share", "WinPXE_ISOs", "/delete"], capture_output=True)
 
 if __name__ == "__main__":
     main()

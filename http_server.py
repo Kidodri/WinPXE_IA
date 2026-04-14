@@ -2,6 +2,9 @@ import http.server
 import socketserver
 import threading
 import os
+import logging
+
+logger = logging.getLogger("WinPXE-Server")
 
 class HTTPServer:
     def __init__(self, ip, port=80, directory="."):
@@ -27,6 +30,7 @@ class HTTPServer:
 
 def generate_ipxe_menu(iso_dir, server_ip, http_port):
     isos = [f for f in os.listdir(iso_dir) if f.lower().endswith(".iso")]
+    extract_base = "netboot/extracted"
 
     menu = "#!ipxe\n\n"
     # Try to initialize USB keyboard and give it a second
@@ -53,12 +57,31 @@ def generate_ipxe_menu(iso_dir, server_ip, http_port):
     for i, iso in enumerate(isos):
         menu += f":iso_{i}\n"
         menu += f"echo Booting {iso}...\n"
-        if "win" in iso.lower():
-            menu += "echo Windows ISO detected. Loading via 'sanboot'...\n"
-            menu += "echo Note: Booting Windows ISOs directly via HTTP may require\n"
-            menu += "echo the 'memdisk' module or a specific iPXE build.\n"
-        # Using sanboot for general ISOs (removed --mem for better compatibility)
-        menu += f"sanboot http://{server_ip}:{http_port}/isos/{iso}\n"
+
+        # Check if this is a processed Windows ISO
+        safe_name = os.path.splitext(iso)[0].replace(" ", "_").replace(".", "_")
+        wim_path = os.path.join(extract_base, safe_name, "boot.wim")
+
+        if os.path.exists(wim_path):
+            logger.info(f"Generating wimboot entry for {iso}")
+            ext_dir = f"http://{server_ip}:{http_port}/netboot/extracted/{safe_name}"
+            menu += "echo Optimized Windows Boot detected (wimboot)...\n"
+            menu += f"kernel http://{server_ip}:{http_port}/netboot/wimboot\n"
+            menu += f"initrd {ext_dir}/bootmgfw.efi bootmgfw.efi\n"
+            menu += f"initrd {ext_dir}/bcd bcd\n"
+            menu += f"initrd {ext_dir}/boot.sdi boot.sdi\n"
+            menu += f"initrd {ext_dir}/boot.wim boot.wim\n"
+            menu += "echo Note: After WinPE loads, you can start installation with:\n"
+            menu += f"echo net use Z: \\\\{server_ip}\\WinPXE_ISOs\\extracted\\{safe_name}\n"
+            menu += "echo Z:\\setup.exe\n"
+            menu += "boot\n"
+        else:
+            if "win" in iso.lower():
+                menu += "echo Windows ISO detected but not processed. Falling back to 'sanboot'...\n"
+                menu += "echo Note: This will likely fail to find media drivers.\n"
+            # Using sanboot for general ISOs (removed --mem for better compatibility)
+            menu += f"sanboot http://{server_ip}:{http_port}/isos/{iso}\n"
+
         menu += "goto start\n\n"
 
     menu += ":shell\n"
