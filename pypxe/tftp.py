@@ -36,6 +36,7 @@ class Client:
         self.filename = ''
         self.wrap = 0
         self.arm_wrap = False
+        self.sock = None
         self.handle() # message from the main socket
 
     def ready(self):
@@ -78,7 +79,10 @@ class Client:
 
     def valid_mode(self):
         '''Determines if the file read mode octet; if not, send an error.'''
-        mode = self.message.split(b'\x00')[1]
+        parts = self.message.split(b'\x00')
+        if len(parts) < 2:
+            return False
+        mode = parts[1]
         if mode == b'octet': return True
         self.send_error(5, 'Mode {0} not supported'.format(mode))
         return False
@@ -88,7 +92,14 @@ class Client:
             Determines if the file exists under the netboot_directory,
             and if it is a file; if not, send an error.
         '''
-        filename = self.message.split(b'\x00')[0].decode('ascii').lstrip('/')
+        parts = self.message.split(b'\x00')
+        if not parts:
+            return False
+        try:
+            filename = parts[0].decode('ascii').lstrip('/')
+        except UnicodeDecodeError:
+            self.send_error(0, 'Invalid filename encoding')
+            return False
         try:
             filename = helpers.normalize_path(self.netboot_directory, filename)
         except helpers.PathTraversalException:
@@ -97,6 +108,12 @@ class Client:
         if os.path.lexists(filename) and os.path.isfile(filename):
             self.filename = filename
             return True
+
+        # If the file is 'autoexec.ipxe' and not found, maybe we should log it specifically
+        # as it's a common iPXE fallback.
+        if os.path.basename(filename) == 'autoexec.ipxe':
+            self.logger.warning(f"iPXE requested {filename} but it does not exist. This usually means DHCP chainloading failed.")
+
         self.send_error(1, 'File Not Found', filename = filename)
         return False
 
@@ -105,8 +122,18 @@ class Client:
             Extracts the options sent from a client; if any, calculates the last
             block based on the filesize and blocksize.
         '''
-        options = self.message.split(b'\x00')[2: -1]
-        options = dict(zip((i.decode('ascii') for i in options[0::2]), map(int, options[1::2])))
+        parts = self.message.split(b'\x00')
+        if len(parts) < 3:
+            self.lastblock = math.ceil(self.filesize / float(self.blksize))
+            return False
+
+        options_list = parts[2: -1]
+        options = {}
+        try:
+            options = dict(zip((i.decode('ascii') for i in options_list[0::2]), map(int, options_list[1::2])))
+        except (ValueError, UnicodeDecodeError, IndexError):
+            pass
+
         self.changed_blksize = 'blksize' in options
         if self.changed_blksize:
             self.blksize = options['blksize']
@@ -189,20 +216,36 @@ class Client:
             and marks ourselves as dead to be cleaned up.
         '''
         try:
-            self.fh.close()
+            if self.fh:
+                self.fh.close()
         except AttributeError:
             pass # we have not opened yet or file-not-found
-        self.sock.close()
+        if self.sock:
+            self.sock.close()
         self.dead = True
 
     def handle(self):
         '''Takes the message from the parent socket and act accordingly.'''
         # if addr not in ongoing, call this, else ready()
+        if len(self.message) < 2:
+            self.logger.error('Received message too short ({0} bytes) from {1}'.format(len(self.message), self.address))
+            self.dead = True
+            return
+
         [opcode] = struct.unpack('!H', self.message[:2])
         if opcode == 1:
             self.message = self.message[2:]
+            self.logger.info(f"RRQ (Read Request) received from {self.address}")
             self.new_request()
         elif opcode == 4:
+            if not self.sock:
+                self.logger.error('Received ACK but no socket exists for client {0}'.format(self.address))
+                self.dead = True
+                return
+            if len(self.message) < 4:
+                self.logger.error('Received short ACK ({0} bytes) from {1}'.format(len(self.message), self.address))
+                self.dead = True
+                return
             [block] = struct.unpack('!H', self.message[2:4])
             if block == 0 and self.arm_wrap:
                 self.wrap += 1
@@ -223,6 +266,12 @@ class Client:
                 self.block = block + 1
                 self.retries = self.default_retries
                 self.send_block()
+        elif opcode == 5:
+            # error packet from client
+            [error_code] = struct.unpack('!H', self.message[2:4])
+            error_msg = self.message[4:].strip(b'\x00').decode('ascii', errors='ignore')
+            self.logger.info(f"Client {self.address} sent error {error_code}: {error_msg}")
+            self.complete()
         elif opcode == 2:
             # write request
             self.sock = ParentSocket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -232,6 +281,9 @@ class Client:
             self.sock.parent = self
             # send error
             self.send_error(4, 'Write support not implemented')
+            self.dead = True
+        else:
+            self.logger.error('Received unknown opcode {0} from {1}'.format(opcode, self.address))
             self.dead = True
 
 
@@ -279,21 +331,43 @@ class TFTPD:
         '''This method listens for incoming requests.'''
         while True:
             # remove complete clients to select doesn't fail
-            for client in self.ongoing:
+            for client in self.ongoing[:]:
                 if client.dead:
                     self.ongoing.remove(client)
-            rlist, _, _ = select.select([self.sock] + [client.sock for client in self.ongoing if not client.dead], [], [], 1)
+
+            # Filter out sockets that might have been closed but not yet removed
+            valid_sockets = [self.sock]
+            for client in self.ongoing:
+                if not client.dead and client.sock:
+                    valid_sockets.append(client.sock)
+
+            try:
+                rlist, _, _ = select.select(valid_sockets, [], [], 1)
+            except (ValueError, socket.error) as e:
+                self.logger.error(f"Select error: {e}")
+                continue
+
             for sock in rlist:
-                if sock == self.sock:
-                    # main socket, so new client
-                    self.ongoing.append(Client(sock, self))
-                else:
-                    # client socket, so tell the client object it's ready
-                    sock.parent.ready()
+                try:
+                    if sock == self.sock:
+                        # main socket, so new client
+                        self.ongoing.append(Client(sock, self))
+                    else:
+                        # client socket, so tell the client object it's ready
+                        sock.parent.ready()
+                except Exception as e:
+                    self.logger.error(f"Error handling socket: {e}")
+
             # if we haven't received an ACK in timeout time, retry
-            [client.send_block() for client in self.ongoing if client.no_ack()]
+            for client in self.ongoing:
+                if not client.dead and client.sock and client.no_ack():
+                    try:
+                        client.send_block()
+                    except Exception as e:
+                        self.logger.error(f"Error resending block to {client.address}: {e}")
+                        client.complete()
             # if we have run out of retries, kill the client
             for client in self.ongoing:
-                if client.no_retries():
+                if not client.dead and client.no_retries():
                     client.logger.info('Timeout while sending {0}'.format(client.filename))
                     client.complete()
