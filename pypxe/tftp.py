@@ -266,6 +266,12 @@ class Client:
                 self.block = block + 1
                 self.retries = self.default_retries
                 self.send_block()
+        elif opcode == 5:
+            # error packet from client
+            [error_code] = struct.unpack('!H', self.message[2:4])
+            error_msg = self.message[4:].strip(b'\x00').decode('ascii', errors='ignore')
+            self.logger.info(f"Client {self.address} sent error {error_code}: {error_msg}")
+            self.complete()
         elif opcode == 2:
             # write request
             self.sock = ParentSocket(socket.AF_INET, socket.SOCK_DGRAM)

@@ -29,6 +29,11 @@ def generate_ipxe_menu(iso_dir, server_ip, http_port):
     isos = [f for f in os.listdir(iso_dir) if f.lower().endswith(".iso")]
 
     menu = "#!ipxe\n\n"
+    # Ensure console is initialized, can help with keyboard issues
+    menu += "console\n"
+    menu += "set menu-timeout 30000\n"
+    menu += "set menu-default iso_0\n\n"
+
     menu += ":start\n"
     menu += "menu WinPXE Boot Menu\n"
     menu += "item --gap --             ------------------------- ISO Images -------------------------\n"
@@ -40,7 +45,7 @@ def generate_ipxe_menu(iso_dir, server_ip, http_port):
     menu += "item shell iPXE shell\n"
     menu += "item exit  Exit and continue booting\n\n"
 
-    menu += "choose target && goto ${target}\n\n"
+    menu += "choose --timeout ${menu-timeout} --default ${menu-default} target && goto ${target}\n\n"
 
     for i, iso in enumerate(isos):
         menu += f":iso_{i}\n"
