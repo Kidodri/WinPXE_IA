@@ -88,7 +88,7 @@ class ProxyDHCP:
                 ("message-type", msg_type_str),
                 ("server_id", self.server_ip),
                 ("vendor_class_id", b"PXEClient"),
-                (66, self.server_ip),
+                (66, self.server_ip.encode()),
                 (67, boot_file.encode() + b"\x00"),
                 # Option 43: PXE Vendor Specific Options
                 # Suboption 6: 0x01, value 0x08 (PXE_DISCOVERY_CONTROL: bits 3=Disable multicast discovery, always use unicast/broadcast)
