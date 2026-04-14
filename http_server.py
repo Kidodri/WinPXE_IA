@@ -28,7 +28,7 @@ class HTTPServer:
         self.thread.daemon = True
         self.thread.start()
 
-def generate_ipxe_menu(iso_dir, server_ip, http_port):
+def generate_ipxe_menu(iso_dir, server_ip, http_port, smb_user="Guest", smb_pass=""):
     isos = [f for f in os.listdir(iso_dir) if f.lower().endswith(".iso")]
     extract_base = "netboot/extracted"
 
@@ -66,6 +66,7 @@ def generate_ipxe_menu(iso_dir, server_ip, http_port):
             logger.info(f"Generating automated wimboot entry for {iso}")
 
             # Generate the startup script for this ISO
+            # We use 'ping' instead of 'timeout' because 'timeout' is often missing in WinPE
             startup_script = f"""@echo off
 echo ========================================================
 echo   WinPXE Automated Windows Installation
@@ -76,12 +77,19 @@ wpeinit
 
 :retry
 echo Attempting to mount SMB share: \\\\{server_ip}\\WinPXE_ISOs
-net use Z: \\\\{server_ip}\\WinPXE_ISOs /user:Guest "" >nul 2>&1
+echo Using credentials: {smb_user} / {'*' * len(smb_pass) if smb_pass else 'No password'}
+net use Z: \\\\{server_ip}\\WinPXE_ISOs "{smb_pass}" /user:"{smb_user}" >nul 2>&1
+
 if errorlevel 1 (
     echo.
-    echo [!] Failed to connect to server. Retrying in 5 seconds...
-    echo     Tip: Ensure 'Password protected sharing' is OFF on the server.
-    timeout /t 5 >nul
+    echo [!] Failed to connect to server (Error Code: %errorlevel%).
+    echo     Retrying in 5 seconds...
+    echo.
+    echo     Debugging Tips:
+    echo     - Ensure the host firewall allows File and Printer Sharing.
+    echo     - Ensure the host network profile is set to 'Private'.
+    echo.
+    ping -n 6 127.0.0.1 >nul
     goto retry
 )
 

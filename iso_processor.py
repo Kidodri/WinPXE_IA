@@ -35,7 +35,10 @@ class ISOProcessor:
         iso_extract_path = os.path.join(full_extract_base, safe_name)
 
         if os.path.exists(target_dir) and os.path.exists(iso_extract_path):
-            if os.path.exists(os.path.join(target_dir, "boot.wim")):
+            # Verify that both the iPXE boot files and the full SMB extraction are present
+            if os.path.exists(os.path.join(target_dir, "boot.wim")) and \
+               (os.path.exists(os.path.join(iso_extract_path, "sources", "install.wim")) or \
+                os.path.exists(os.path.join(iso_extract_path, "sources", "install.esd"))):
                 logger.info(f"ISO '{iso_name}' already fully processed.")
                 return
 
