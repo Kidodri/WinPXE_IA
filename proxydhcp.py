@@ -61,14 +61,14 @@ class ProxyDHCP:
         elif msg_type == 3 or msg_type == 'request':
             server_id = dhcp_options.get('server_id')
             print(f"Detected {'iPXE' if is_ipxe else 'PXE'} Request from {client_mac} (Port 4011: {is_port_4011}, Server ID: {server_id})")
-            print(f"   Client IP: {pkt[IP].src}, Next Server IP: {pkt[BOOTP].siaddr}, Flags: {hex(pkt[BOOTP].flags)}")
+            print(f"   Client IP: {pkt[IP].src}, Next Server IP: {pkt[BOOTP].siaddr}, Flags: {hex(int(pkt[BOOTP].flags))}")
             self.send_reply(pkt, boot_file, "ack")
 
     def send_reply(self, request_pkt, boot_file, msg_type_str):
         # Destination logic
         dst_ip = "255.255.255.255"
-        # Match client's broadcast flag in BOOTP
-        flags = request_pkt[BOOTP].flags
+        # Match client's broadcast flag in BOOTP - Cast to int to avoid Scapy FlagValue issues
+        flags = int(request_pkt[BOOTP].flags)
 
         # If the request is from port 4011, it's a unicast request, we MUST unicast back.
         if request_pkt[UDP].dport == 4011:
