@@ -63,17 +63,54 @@ def generate_ipxe_menu(iso_dir, server_ip, http_port):
         wim_path = os.path.join(extract_base, safe_name, "boot.wim")
 
         if os.path.exists(wim_path):
-            logger.info(f"Generating wimboot entry for {iso}")
+            logger.info(f"Generating automated wimboot entry for {iso}")
+
+            # Generate the startup script for this ISO
+            startup_script = f"""@echo off
+echo ========================================================
+echo   WinPXE Automated Windows Installation
+echo ========================================================
+echo.
+echo Waiting for network initialization...
+wpeinit
+
+:retry
+echo Attempting to mount SMB share: \\\\{server_ip}\\WinPXE_ISOs
+net use Z: \\\\{server_ip}\\WinPXE_ISOs /user:Guest "" >nul 2>&1
+if errorlevel 1 (
+    echo.
+    echo [!] Failed to connect to server. Retrying in 5 seconds...
+    echo     Tip: Ensure 'Password protected sharing' is OFF on the server.
+    timeout /t 5 >nul
+    goto retry
+)
+
+echo [OK] Connected to server.
+echo [OK] Launching Setup for {iso}...
+Z:\\extracted\\{safe_name}\\setup.exe
+"""
+            script_path = os.path.join(extract_base, safe_name, "winpxe_startup.bat")
+            with open(script_path, "w") as f:
+                f.write(startup_script)
+
+            # Generate winpeshl.ini to trigger the script
+            # Note: winpeshl.ini looks for apps in Windows\System32 by default
+            # We will inject our script there.
+            ini_content = f'[LaunchApps]\n"X:\\Windows\\System32\\winpxe_startup.bat"\n'
+            ini_path = os.path.join(extract_base, safe_name, "winpeshl.ini")
+            with open(ini_path, "w") as f:
+                f.write(ini_content)
+
             ext_dir = f"http://{server_ip}:{http_port}/netboot/extracted/{safe_name}"
-            menu += "echo Optimized Windows Boot detected (wimboot)...\n"
+            menu += "echo Optimized Windows Boot detected (Automated)...\n"
             menu += f"kernel http://{server_ip}:{http_port}/netboot/wimboot\n"
             menu += f"initrd {ext_dir}/bootmgfw.efi bootmgfw.efi\n"
             menu += f"initrd {ext_dir}/bcd bcd\n"
             menu += f"initrd {ext_dir}/boot.sdi boot.sdi\n"
             menu += f"initrd {ext_dir}/boot.wim boot.wim\n"
-            menu += "echo Note: After WinPE loads, you can start installation with:\n"
-            menu += f"echo net use Z: \\\\{server_ip}\\WinPXE_ISOs\\extracted\\{safe_name}\n"
-            menu += "echo Z:\\setup.exe\n"
+            # Injecting into Windows/System32 allows WinPE to find them automatically
+            menu += f"initrd {ext_dir}/winpeshl.ini Windows/System32/winpeshl.ini\n"
+            menu += f"initrd {ext_dir}/winpxe_startup.bat Windows/System32/winpxe_startup.bat\n"
             menu += "boot\n"
         else:
             if "win" in iso.lower():

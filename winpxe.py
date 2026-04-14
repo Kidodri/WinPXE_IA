@@ -97,6 +97,12 @@ def main():
     logger.info(f"Server IP: {server_ip}")
     logger.info(f"ISO Directory: {os.path.abspath(iso_dir)}")
     logger.info(f"SMB Share Path: \\\\{server_ip}\\WinPXE_ISOs")
+    logger.info("---")
+    logger.info("IMPORTANT FOR WINDOWS INSTALLATION:")
+    logger.info("1. Ensure 'Password protected sharing' is TURNED OFF in Windows settings.")
+    logger.info("   (Control Panel > Network and Sharing Center > Advanced sharing settings)")
+    logger.info("2. If the client fails to connect, try the 'Guest' account or check folder permissions.")
+    logger.info("---")
     logger.info("Ready for client connections. Press Ctrl+C to stop.")
 
     try:
