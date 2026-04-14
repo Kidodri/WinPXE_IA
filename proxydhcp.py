@@ -53,13 +53,17 @@ class ProxyDHCP:
             print(f"Detected {'iPXE' if is_ipxe else 'PXE'} Discover from {pkt[Ether].src}")
             self.send_reply(pkt, boot_file, "offer")
         elif msg_type == 3 or msg_type == 'request':
-            # We respond with a ProxyDHCP ACK if:
+            # In ProxyDHCP, we respond with an ACK if:
             # 1. The request is specifically for our Server ID
             # 2. OR the request came on port 4011 (ProxyDHCP unicast)
+            # 3. OR the request is a broadcast and we already sent an offer (most common)
+            # To stay simple and effective, we respond to any PXE Request.
             server_id = dhcp_options.get('server_id')
-            if server_id == self.server_ip or is_port_4011:
-                print(f"Detected {'iPXE' if is_ipxe else 'PXE'} Request from {pkt[Ether].src} (Port 4011: {is_port_4011})")
-                self.send_reply(pkt, boot_file, "ack")
+
+            # If server_id is present and it's NOT us, it means the client is accepting
+            # an IP from another server. In ProxyDHCP, we SHOULD still send our boot info ACK.
+            print(f"Detected {'iPXE' if is_ipxe else 'PXE'} Request from {pkt[Ether].src} (Port 4011: {is_port_4011}, Server ID: {server_id})")
+            self.send_reply(pkt, boot_file, "ack")
 
     def send_reply(self, request_pkt, boot_file, msg_type_str):
         # Destination: Broadcast by default, but unicast if we have a client IP (port 4011 requests)
@@ -92,8 +96,8 @@ class ProxyDHCP:
                 (67, boot_file.encode() + b"\x00"),
                 # Option 43: PXE Vendor Specific Options
                 # Suboption 6: 0x01, value 0x08 (PXE_DISCOVERY_CONTROL: bits 3=Disable multicast discovery, always use unicast/broadcast)
-                # Suboption 10: 0x05, value 0x00 0x00 b'PXE' (PXE_MENU_PROMPT: Timeout 0, Padding 0, "PXE")
-                (43, b"\x06\x01\x08\x0a\x05\x00\x00\x50\x58\x45\xff"),
+                # Suboption 10: 0x04, value 0x00 b'PXE' (PXE_MENU_PROMPT: Timeout 0, "PXE")
+                (43, b"\x06\x01\x08\x0a\x04\x00\x50\x58\x45\xff"),
                 ("end")
             ])
         )
