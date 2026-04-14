@@ -29,6 +29,9 @@ def generate_ipxe_menu(iso_dir, server_ip, http_port):
     isos = [f for f in os.listdir(iso_dir) if f.lower().endswith(".iso")]
 
     menu = "#!ipxe\n\n"
+    # Try to initialize USB keyboard and give it a second
+    menu += "usb-keyboard ||\n"
+    menu += "sleep 1\n"
     # Ensure console is initialized, can help with keyboard issues
     menu += "console\n"
     menu += "set menu-timeout 30000\n"
@@ -51,12 +54,11 @@ def generate_ipxe_menu(iso_dir, server_ip, http_port):
         menu += f":iso_{i}\n"
         menu += f"echo Booting {iso}...\n"
         if "win" in iso.lower():
-            menu += "echo Windows ISO detected. Loading via 'sanboot --mem'...\n"
-            menu += "echo Note: Large Windows ISOs require significant RAM (ISO size + 2GB).\n"
-            menu += "echo If the installer asks for drivers or cannot find a disk,\n"
-            menu += "echo consider using a WinPE-based approach with an SMB share.\n"
-        # Using sanboot --mem for general ISOs
-        menu += f"sanboot --mem http://{server_ip}:{http_port}/isos/{iso}\n"
+            menu += "echo Windows ISO detected. Loading via 'sanboot'...\n"
+            menu += "echo Note: Booting Windows ISOs directly via HTTP may require\n"
+            menu += "echo the 'memdisk' module or a specific iPXE build.\n"
+        # Using sanboot for general ISOs (removed --mem for better compatibility)
+        menu += f"sanboot http://{server_ip}:{http_port}/isos/{iso}\n"
         menu += "goto start\n\n"
 
     menu += ":shell\n"
