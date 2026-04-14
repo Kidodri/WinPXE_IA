@@ -36,6 +36,7 @@ class Client:
         self.filename = ''
         self.wrap = 0
         self.arm_wrap = False
+        self.sock = None
         self.handle() # message from the main socket
 
     def ready(self):
@@ -189,20 +190,31 @@ class Client:
             and marks ourselves as dead to be cleaned up.
         '''
         try:
-            self.fh.close()
+            if self.fh:
+                self.fh.close()
         except AttributeError:
             pass # we have not opened yet or file-not-found
-        self.sock.close()
+        if self.sock:
+            self.sock.close()
         self.dead = True
 
     def handle(self):
         '''Takes the message from the parent socket and act accordingly.'''
         # if addr not in ongoing, call this, else ready()
+        if len(self.message) < 2:
+            self.logger.error('Received message too short ({0} bytes) from {1}'.format(len(self.message), self.address))
+            self.dead = True
+            return
+
         [opcode] = struct.unpack('!H', self.message[:2])
         if opcode == 1:
             self.message = self.message[2:]
             self.new_request()
         elif opcode == 4:
+            if not self.sock:
+                self.logger.error('Received ACK but no socket exists for client {0}'.format(self.address))
+                self.dead = True
+                return
             [block] = struct.unpack('!H', self.message[2:4])
             if block == 0 and self.arm_wrap:
                 self.wrap += 1
@@ -232,6 +244,9 @@ class Client:
             self.sock.parent = self
             # send error
             self.send_error(4, 'Write support not implemented')
+            self.dead = True
+        else:
+            self.logger.error('Received unknown opcode {0} from {1}'.format(opcode, self.address))
             self.dead = True
 
 
@@ -282,7 +297,7 @@ class TFTPD:
             for client in self.ongoing:
                 if client.dead:
                     self.ongoing.remove(client)
-            rlist, _, _ = select.select([self.sock] + [client.sock for client in self.ongoing if not client.dead], [], [], 1)
+            rlist, _, _ = select.select([self.sock] + [client.sock for client in self.ongoing if not client.dead and client.sock], [], [], 1)
             for sock in rlist:
                 if sock == self.sock:
                     # main socket, so new client
@@ -291,9 +306,9 @@ class TFTPD:
                     # client socket, so tell the client object it's ready
                     sock.parent.ready()
             # if we haven't received an ACK in timeout time, retry
-            [client.send_block() for client in self.ongoing if client.no_ack()]
+            [client.send_block() for client in self.ongoing if not client.dead and client.sock and client.no_ack()]
             # if we have run out of retries, kill the client
             for client in self.ongoing:
-                if client.no_retries():
+                if not client.dead and client.no_retries():
                     client.logger.info('Timeout while sending {0}'.format(client.filename))
                     client.complete()
