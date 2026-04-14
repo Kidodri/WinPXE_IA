@@ -36,6 +36,8 @@ class ProxyDHCP:
                 is_pxe = True
 
         if is_pxe:
+            if client_mac not in self.pxe_clients:
+                print(f"Adding {client_mac} to PXE client tracking")
             self.pxe_clients.add(client_mac)
 
         is_ipxe = False
@@ -60,6 +62,15 @@ class ProxyDHCP:
             self.send_reply(pkt, boot_file, "offer")
         elif msg_type == 3 or msg_type == 'request':
             server_id = dhcp_options.get('server_id')
+            # ProxyDHCP logic:
+            # 1. If it's on port 4011, it's definitely for us.
+            # 2. If it's on port 67, it MUST be targeting our Server ID to get an ACK from us.
+            # If the client is requesting from the main DHCP server (like 192.168.100.1),
+            # we must stay silent on port 67.
+            if not is_port_4011 and server_id and server_id != self.server_ip:
+                print(f"Ignoring Request from {client_mac} (Targeting Server ID: {server_id}, not ours)")
+                return
+
             print(f"Detected {'iPXE' if is_ipxe else 'PXE'} Request from {client_mac} (Port 4011: {is_port_4011}, Server ID: {server_id})")
             print(f"   Client IP: {pkt[IP].src}, Next Server IP: {pkt[BOOTP].siaddr}, Flags: {hex(int(pkt[BOOTP].flags))}")
             self.send_reply(pkt, boot_file, "ack")
@@ -70,10 +81,16 @@ class ProxyDHCP:
         # Match client's broadcast flag in BOOTP - Cast to int to avoid Scapy FlagValue issues
         flags = int(request_pkt[BOOTP].flags)
 
+        # Determine ports
+        sport = 67
+        dport = 68
+
         # If the request is from port 4011, it's a unicast request, we MUST unicast back.
         if request_pkt[UDP].dport == 4011:
             dst_ip = request_pkt[IP].src
             flags = 0x0000 # Unicast
+            sport = 4011
+            dport = 4011
         elif not (flags & 0x8000) and request_pkt[IP].src != "0.0.0.0":
             # Client requested unicast and has an IP
             dst_ip = request_pkt[IP].src
@@ -87,7 +104,7 @@ class ProxyDHCP:
             ("server_id", self.server_ip),
             ("vendor_class_id", b"PXEClient"),
             (66, self.server_ip.encode()),
-            (67, boot_file.encode() + b"\x00"),
+            (67, boot_file.encode()), # No null terminator here, DHCP strings are usually length-prefixed or null-terminated by the protocol
             (43, b"\x06\x01\x08\xff"), # PXE Discovery Control: 8 (Unicast/Broadcast only)
             ("end")
         ]
@@ -95,7 +112,7 @@ class ProxyDHCP:
         reply = (
             Ether(src=get_if_hwaddr(self.interface), dst=request_pkt[Ether].src) /
             IP(src=self.server_ip, dst=dst_ip) /
-            UDP(sport=67, dport=68) /
+            UDP(sport=sport, dport=dport) /
             BOOTP(
                 op=2,
                 flags=flags,

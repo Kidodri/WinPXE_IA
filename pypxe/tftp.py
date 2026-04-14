@@ -79,7 +79,10 @@ class Client:
 
     def valid_mode(self):
         '''Determines if the file read mode octet; if not, send an error.'''
-        mode = self.message.split(b'\x00')[1]
+        parts = self.message.split(b'\x00')
+        if len(parts) < 2:
+            return False
+        mode = parts[1]
         if mode == b'octet': return True
         self.send_error(5, 'Mode {0} not supported'.format(mode))
         return False
@@ -89,7 +92,14 @@ class Client:
             Determines if the file exists under the netboot_directory,
             and if it is a file; if not, send an error.
         '''
-        filename = self.message.split(b'\x00')[0].decode('ascii').lstrip('/')
+        parts = self.message.split(b'\x00')
+        if not parts:
+            return False
+        try:
+            filename = parts[0].decode('ascii').lstrip('/')
+        except UnicodeDecodeError:
+            self.send_error(0, 'Invalid filename encoding')
+            return False
         try:
             filename = helpers.normalize_path(self.netboot_directory, filename)
         except helpers.PathTraversalException:
@@ -106,8 +116,18 @@ class Client:
             Extracts the options sent from a client; if any, calculates the last
             block based on the filesize and blocksize.
         '''
-        options = self.message.split(b'\x00')[2: -1]
-        options = dict(zip((i.decode('ascii') for i in options[0::2]), map(int, options[1::2])))
+        parts = self.message.split(b'\x00')
+        if len(parts) < 3:
+            self.lastblock = math.ceil(self.filesize / float(self.blksize))
+            return False
+
+        options_list = parts[2: -1]
+        options = {}
+        try:
+            options = dict(zip((i.decode('ascii') for i in options_list[0::2]), map(int, options_list[1::2])))
+        except (ValueError, UnicodeDecodeError, IndexError):
+            pass
+
         self.changed_blksize = 'blksize' in options
         if self.changed_blksize:
             self.blksize = options['blksize']
@@ -209,6 +229,7 @@ class Client:
         [opcode] = struct.unpack('!H', self.message[:2])
         if opcode == 1:
             self.message = self.message[2:]
+            self.logger.info(f"RRQ (Read Request) received from {self.address}")
             self.new_request()
         elif opcode == 4:
             if not self.sock:
@@ -294,17 +315,33 @@ class TFTPD:
         '''This method listens for incoming requests.'''
         while True:
             # remove complete clients to select doesn't fail
-            for client in self.ongoing:
+            for client in self.ongoing[:]:
                 if client.dead:
                     self.ongoing.remove(client)
-            rlist, _, _ = select.select([self.sock] + [client.sock for client in self.ongoing if not client.dead and client.sock], [], [], 1)
+
+            # Filter out sockets that might have been closed but not yet removed
+            valid_sockets = [self.sock]
+            for client in self.ongoing:
+                if not client.dead and client.sock:
+                    valid_sockets.append(client.sock)
+
+            try:
+                rlist, _, _ = select.select(valid_sockets, [], [], 1)
+            except (ValueError, socket.error) as e:
+                self.logger.error(f"Select error: {e}")
+                continue
+
             for sock in rlist:
-                if sock == self.sock:
-                    # main socket, so new client
-                    self.ongoing.append(Client(sock, self))
-                else:
-                    # client socket, so tell the client object it's ready
-                    sock.parent.ready()
+                try:
+                    if sock == self.sock:
+                        # main socket, so new client
+                        self.ongoing.append(Client(sock, self))
+                    else:
+                        # client socket, so tell the client object it's ready
+                        sock.parent.ready()
+                except Exception as e:
+                    self.logger.error(f"Error handling socket: {e}")
+
             # if we haven't received an ACK in timeout time, retry
             [client.send_block() for client in self.ongoing if not client.dead and client.sock and client.no_ack()]
             # if we have run out of retries, kill the client
