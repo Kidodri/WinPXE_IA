@@ -27,33 +27,57 @@ def is_admin():
         # Fallback for non-windows (though this app is windows-centric)
         return os.getuid() == 0 if hasattr(os, 'getuid') else False
 
+def user_exists(username):
+    try:
+        result = subprocess.run(["net", "user", username], capture_output=True, timeout=10)
+        return result.returncode == 0
+    except subprocess.TimeoutExpired:
+        logger.warning(f"Timeout while checking for user '{username}'.")
+        return False
+
 def create_temp_user(username):
     # Generate a secure 16-character password
     alphabet = string.ascii_letters + string.digits
     password = ''.join(secrets.choice(alphabet) for i in range(16))
 
-    logger.info(f"Creating temporary Windows user: {username}")
-
-    # Delete user if it already exists (from a previous crash)
-    subprocess.run(["net", "user", username, "/delete"], capture_output=True)
-
-    # Create the user
-    result = subprocess.run(["net", "user", username, password, "/add", "/expires:never", "/passwordchg:no"], capture_output=True, text=True)
+    try:
+        if user_exists(username):
+            logger.info(f"User '{username}' already exists. Updating password...")
+            # Just update password for existing user
+            result = subprocess.run(["net", "user", username, password], capture_output=True, text=True, timeout=30)
+        else:
+            logger.info(f"Creating new temporary Windows user: {username}")
+            # Create the user
+            result = subprocess.run(["net", "user", username, password, "/add", "/expires:never", "/passwordchg:no"], capture_output=True, text=True, timeout=30)
+    except subprocess.TimeoutExpired:
+        logger.error(f"Timeout while creating/updating user '{username}'.")
+        return None
 
     if result.returncode == 0:
         # Hide the user from the login screen (optional but cleaner)
+        logger.debug(f"Hiding user '{username}' from login screen...")
         reg_path = f"HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon\\SpecialAccounts\\UserList"
         subprocess.run(["reg", "add", reg_path, "/v", username, "/t", "REG_DWORD", "/d", "0", "/f"], capture_output=True)
         return password
     else:
-        logger.error(f"Failed to create temporary user: {result.stderr.strip()}")
+        logger.error(f"Failed to manage temporary user: {result.stderr.strip()}")
         return None
 
 def delete_temp_user(username):
-    logger.info(f"Deleting temporary Windows user: {username}")
-    subprocess.run(["net", "user", username, "/delete"], capture_output=True)
-    reg_path = f"HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon\\SpecialAccounts\\UserList"
-    subprocess.run(["reg", "delete", reg_path, "/v", username, "/f"], capture_output=True)
+    if user_exists(username):
+        logger.info(f"Deleting temporary Windows user: {username}")
+        subprocess.run(["net", "user", username, "/delete"], capture_output=True)
+        reg_path = f"HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon\\SpecialAccounts\\UserList"
+        subprocess.run(["reg", "delete", reg_path, "/v", username, "/f"], capture_output=True)
+
+def cleanup_smb_resources():
+    share_name = "WinPXE_ISOs"
+    logger.info("Cleaning up previous SMB resources...")
+    # Delete share first to unlock any files/user hooks
+    try:
+        subprocess.run(["net", "share", share_name, "/delete"], capture_output=True, timeout=15)
+    except subprocess.TimeoutExpired:
+        logger.warning("Timeout while deleting share. It might be in use.")
 
 def setup_smb_share(iso_dir, username):
     share_name = "WinPXE_ISOs"
@@ -63,15 +87,16 @@ def setup_smb_share(iso_dir, username):
 
     # 1. Apply NTFS permissions (Icacls)
     # (OI)(CI)R = Object Inherit, Container Inherit, Read
-    logger.info(f"Granting NTFS read permissions to {username}...")
-    subprocess.run(["icacls", abs_path, "/grant", f"{username}:(OI)(CI)R"], capture_output=True)
+    logger.info(f"Ensuring NTFS read permissions for {username}...")
+    # We use /grant:r to replace existing permissions for this user if they exist
+    result = subprocess.run(["icacls", abs_path, "/grant:r", f"{username}:(OI)(CI)R"], capture_output=True)
+    if result.returncode != 0:
+        logger.warning(f"Icacls warning: {result.stderr.decode().strip()}")
 
     # 2. Setup the Share
-    # Try to remove existing share first
-    subprocess.run(["net", "share", share_name, "/delete"], capture_output=True)
-
     # Create the share and grant the temp user READ access
-    # We also keep Everyone,READ for maximum compatibility, but the temp user is our primary target
+    # We also keep Everyone,READ for maximum compatibility
+    logger.info(f"Creating network share '{share_name}'...")
     result = subprocess.run(["net", "share", f"{share_name}=\"{abs_path}\"", f"/grant:{username},READ", "/grant:Everyone,READ"], capture_output=True, text=True)
 
     if result.returncode == 0:
@@ -94,7 +119,10 @@ def main():
     import setup_bootloaders
     setup_bootloaders.ensure_bootloaders()
 
-    # 2. Select Interface
+    # 2. SMB Cleanup (Essential before user management)
+    cleanup_smb_resources()
+
+    # 3. Select Interface
     iface = select_interface()
     if not iface:
         sys.exit(1)
@@ -102,7 +130,7 @@ def main():
     server_ip = iface['ip']
     interface_name = iface['name']
 
-    # 3. Process ISOs
+    # 4. Process ISOs
     iso_dir = "isos"
     if not os.path.exists(iso_dir):
         os.makedirs(iso_dir)
@@ -110,7 +138,7 @@ def main():
     processor = ISOProcessor(iso_dir=iso_dir)
     processor.process_all()
 
-    # 4. Create Temporary User for SMB
+    # 5. Create Temporary User for SMB
     temp_username = "WinPXE_User"
     temp_password = create_temp_user(temp_username)
     if not temp_password:
@@ -118,13 +146,13 @@ def main():
         temp_username = "Guest" # Fallback
         temp_password = ""
 
-    # 5. Setup SMB Share
+    # 6. Setup SMB Share
     setup_smb_share(iso_dir, temp_username)
 
-    # 6. Generate iPXE Menu (Now passes credentials)
+    # 7. Generate iPXE Menu (Now passes credentials)
     generate_ipxe_menu(iso_dir, server_ip, 80, smb_user=temp_username, smb_pass=temp_password)
 
-    # 7. Start Servers
+    # 8. Start Servers
     tftp = TFTPServer(server_ip)
     http = HTTPServer("0.0.0.0", 80, ".")
     pdhcp = ProxyDHCP(interface_name, server_ip, "ipxe.efi")
@@ -149,7 +177,7 @@ def main():
         logger.info("Shutting down...")
         pdhcp.stop()
         # Clean up share and user on exit
-        subprocess.run(["net", "share", "WinPXE_ISOs", "/delete"], capture_output=True)
+        cleanup_smb_resources()
         if temp_username != "Guest":
             delete_temp_user(temp_username)
 
