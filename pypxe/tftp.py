@@ -108,6 +108,12 @@ class Client:
         if os.path.lexists(filename) and os.path.isfile(filename):
             self.filename = filename
             return True
+
+        # If the file is 'autoexec.ipxe' and not found, maybe we should log it specifically
+        # as it's a common iPXE fallback.
+        if os.path.basename(filename) == 'autoexec.ipxe':
+            self.logger.warning(f"iPXE requested {filename} but it does not exist. This usually means DHCP chainloading failed.")
+
         self.send_error(1, 'File Not Found', filename = filename)
         return False
 
@@ -236,6 +242,10 @@ class Client:
                 self.logger.error('Received ACK but no socket exists for client {0}'.format(self.address))
                 self.dead = True
                 return
+            if len(self.message) < 4:
+                self.logger.error('Received short ACK ({0} bytes) from {1}'.format(len(self.message), self.address))
+                self.dead = True
+                return
             [block] = struct.unpack('!H', self.message[2:4])
             if block == 0 and self.arm_wrap:
                 self.wrap += 1
@@ -343,7 +353,13 @@ class TFTPD:
                     self.logger.error(f"Error handling socket: {e}")
 
             # if we haven't received an ACK in timeout time, retry
-            [client.send_block() for client in self.ongoing if not client.dead and client.sock and client.no_ack()]
+            for client in self.ongoing:
+                if not client.dead and client.sock and client.no_ack():
+                    try:
+                        client.send_block()
+                    except Exception as e:
+                        self.logger.error(f"Error resending block to {client.address}: {e}")
+                        client.complete()
             # if we have run out of retries, kill the client
             for client in self.ongoing:
                 if not client.dead and client.no_retries():

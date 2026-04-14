@@ -18,8 +18,12 @@ class ProxyDHCP:
         for opt in pkt[DHCP].options:
             if isinstance(opt, tuple):
                 dhcp_options[opt[0]] = opt[1]
-            elif opt == 'end':
+            elif isinstance(opt, str):
+                dhcp_options[opt] = True
+            if opt == 'end':
                 break
+
+        # print(f"DEBUG: DHCP Options from {pkt[Ether].src}: {dhcp_options}")
 
         msg_type = dhcp_options.get('message-type')
         if msg_type is None:
@@ -41,7 +45,18 @@ class ProxyDHCP:
             self.pxe_clients.add(client_mac)
 
         is_ipxe = False
-        if 77 in dhcp_options and b'iPXE' in dhcp_options[77]:
+        # Scapy might use 'user_class' or 77. Also iPXE might send it as a string or bytes, or a list.
+        # iPXE also sometimes identifies itself in Option 175.
+        user_class = dhcp_options.get(77) or dhcp_options.get('user_class')
+
+        def check_ipxe(val):
+            if isinstance(val, (bytes, str)):
+                return (b'iPXE' if isinstance(val, bytes) else 'iPXE') in val
+            if isinstance(val, list):
+                return any(check_ipxe(item) for item in val)
+            return False
+
+        if check_ipxe(user_class) or dhcp_options.get(175) or dhcp_options.get('ipxe'):
             is_ipxe = True
 
         # In ProxyDHCP mode, we ONLY respond to PXEClient requests

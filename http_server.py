@@ -61,6 +61,7 @@ def generate_ipxe_menu(iso_dir, server_ip, http_port):
     menu += ":exit\n"
     menu += "exit\n"
 
+    os.makedirs("netboot", exist_ok=True)
     with open("netboot/boot.ipxe", "w") as f:
         f.write(menu)
     print("Generated netboot/boot.ipxe")
