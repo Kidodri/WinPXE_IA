@@ -79,11 +79,13 @@ ping -n 16 127.0.0.1 >nul
 
 echo.
 echo [2/3] Network Diagnostics:
-ipconfig | find "IPv4"
-if errorlevel 1 (
-    echo [!] No IPv4 address detected!
-    echo     Check your DHCP server or network cable.
-)
+ipconfig
+echo.
+echo --------------------------------------------------------
+echo If no IPv4 address is shown above, WinPE lacks drivers
+echo for your network card or DHCP failed.
+echo --------------------------------------------------------
+echo.
 
 :wait_for_server
 echo Checking connectivity to server {server_ip}...
@@ -109,8 +111,12 @@ if errorlevel 1 (
     echo If 'Password Protected Sharing' is enabled on the server host,
     echo you MUST enter valid Windows credentials for that machine.
     echo.
+    set "PXE_USER="
+    set "PXE_PASS="
     set /p "PXE_USER=Username: "
     set /p "PXE_PASS=Password: "
+
+    if not defined PXE_USER goto retry
 
     echo.
     echo Retrying with credentials for %PXE_USER%...
@@ -126,15 +132,30 @@ if errorlevel 1 (
     echo 2. Is 'File and Printer Sharing' allowed in Firewall?
     echo 3. Are the credentials correct?
     echo.
-    echo Retrying in 10 seconds...
-    ping -n 11 127.0.0.1 >nul
+    echo [P] Pause and keep window open for debugging
+    echo [R] Retry now
+    set /p "CHOICE=Choice (P/R): "
+    if /i "%CHOICE%"=="P" (
+        echo.
+        echo Entering Debug Shell. Type 'exit' to return to retry loop.
+        cmd /k
+    )
     goto retry
 )
 
 echo.
 echo [OK] Connected to server successfully.
-echo [OK] Launching Setup for {iso}...
-Z:\\extracted\\{safe_name}\\setup.exe
+echo [OK] Searching for Setup for {iso}...
+if exist "Z:\\extracted\\{safe_name}\\setup.exe" (
+    Z:\\extracted\\{safe_name}\\setup.exe
+) else (
+    echo [!] FATAL ERROR: setup.exe not found at Z:\\extracted\\{safe_name}\\setup.exe
+    echo Listing Z:\\extracted for debugging:
+    dir Z:\\extracted
+    echo.
+    echo Staying in debug shell...
+    cmd /k
+)
 """
             script_path = os.path.join(extract_base, safe_name, "winpxe_startup.bat")
             with open(script_path, "w") as f:
