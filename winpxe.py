@@ -36,23 +36,40 @@ def cleanup_smb_resources():
     except subprocess.TimeoutExpired:
         logger.warning("Timeout while deleting share. It might be in use.")
 
+def get_localized_everyone():
+    """Returns the localized name for the 'Everyone' group using PowerShell."""
+    try:
+        # Use SID S-1-1-0 to find the localized name
+        ps_cmd = "(New-Object System.Security.Principal.SecurityIdentifier('S-1-1-0')).Translate([System.Security.Principal.NTAccount]).Value"
+        result = subprocess.run(["powershell", "-Command", ps_cmd], capture_output=True, text=True, timeout=10)
+        if result.returncode == 0:
+            name = result.stdout.strip()
+            if name:
+                return name
+    except Exception as e:
+        logger.debug(f"Failed to get localized 'Everyone' name: {e}")
+    return "Everyone" # Fallback
+
 def setup_smb_share(iso_dir):
     share_name = "WinPXE_ISOs"
     abs_path = os.path.abspath(iso_dir)
+    everyone_name = get_localized_everyone()
 
     logger.info(f"Setting up SMB share for {abs_path}...")
 
     # 1. Apply NTFS permissions (Icacls)
+    # We use the SID *S-1-1-0 for Everyone to be language-independent in icacls
     # (OI)(CI)R = Object Inherit, Container Inherit, Read
-    logger.info(f"Ensuring NTFS read permissions for Everyone...")
-    result = subprocess.run(["icacls", abs_path, "/grant:r", "Everyone:(OI)(CI)R"], capture_output=True)
+    logger.info(f"Ensuring NTFS read permissions for {everyone_name} (SID: *S-1-1-0)...")
+    result = subprocess.run(["icacls", abs_path, "/grant:r", "*S-1-1-0:(OI)(CI)R"], capture_output=True)
     if result.returncode != 0:
-        logger.warning(f"Icacls warning: {result.stderr.decode().strip()}")
+        logger.warning(f"Icacls warning: {result.stderr.decode('cp850', errors='replace').strip()}")
 
     # 2. Setup the Share
     # Create the share and grant Everyone READ access
-    logger.info(f"Creating network share '{share_name}'...")
-    result = subprocess.run(["net", "share", f"{share_name}=\"{abs_path}\"", "/grant:Everyone,READ"], capture_output=True, text=True)
+    # We remove manual quotes from the path as subprocess.run handles it
+    logger.info(f"Creating network share '{share_name}' granting access to '{everyone_name}'...")
+    result = subprocess.run(["net", "share", f"{share_name}={abs_path}", f"/grant:{everyone_name},READ"], capture_output=True, text=True)
 
     if result.returncode == 0:
         logger.info(f"SMB Share '{share_name}' created successfully.")
