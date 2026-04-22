@@ -68,105 +68,106 @@ def generate_ipxe_menu(iso_dir, server_ip, http_port):
             # Generate the startup script for this ISO
             # We use 'ping' instead of 'timeout' because 'timeout' is often missing in WinPE
             startup_script = f"""@echo off
+echo.
 echo ========================================================
 echo   WinPXE Automated Windows Installation
 echo ========================================================
 echo.
-echo [1/3] Initializing network stack (wpeinit)...
+echo [DEBUG] Target Server: {server_ip}
+echo [DEBUG] Target ISO: {iso}
+echo.
+echo [STEP 1] Initializing network...
 wpeinit
-echo Waiting 15 seconds for DHCP...
+echo Waiting 15 seconds for network...
 ping -n 16 127.0.0.1 >nul
 
 echo.
-echo [2/3] Network Diagnostics:
+echo [STEP 2] Network Config:
 ipconfig
 echo.
-echo --------------------------------------------------------
-echo If no IPv4 address is shown above, WinPE lacks drivers
-echo for your network card or DHCP failed.
-echo --------------------------------------------------------
-echo.
+echo If no IP address is shown, drivers are missing or DHCP failed.
+echo Press any key to continue...
+pause
 
 :wait_for_server
-echo Checking connectivity to server {server_ip}...
+echo.
+echo Checking connectivity to {server_ip}...
 ping -n 1 {server_ip} >nul
 if errorlevel 1 (
     echo [!] Server {server_ip} is NOT reachable.
-    echo     Retrying in 5 seconds (Ctrl+C to cancel)...
+    echo     Check cables and Firewall on Host.
+    echo     Retrying in 5 seconds...
     ping -n 6 127.0.0.1 >nul
     goto wait_for_server
 )
-echo [OK] Server {server_ip} is reachable.
+echo [OK] Server is reachable.
 
-echo.
-echo [3/3] Mounting SMB share: \\\\{server_ip}\\WinPXE_ISOs
 :retry
-echo Attempting Anonymous connection (Guest)...
-net use Z: \\\\{server_ip}\\WinPXE_ISOs /user:Guest "" >nul 2>&1
+echo.
+echo [STEP 3] Mounting SMB share: \\\\{server_ip}\\WinPXE_ISOs
+net use Z: "\\\\{server_ip}\\WinPXE_ISOs" /user:Guest "" >nul 2>&1
 
 if errorlevel 1 (
     echo.
-    echo [!] Anonymous connection failed (Error Code: %errorlevel%).
+    echo [!] Anonymous connection failed.
+    echo     If 'Password Protected Sharing' is ON, enter credentials:
     echo.
-    echo If 'Password Protected Sharing' is enabled on the server host,
-    echo you MUST enter valid Windows credentials for that machine.
-    echo.
-    set "PXE_USER="
-    set "PXE_PASS="
-    set /p "PXE_USER=Username: "
-    set /p "PXE_PASS=Password: "
-
-    if not defined PXE_USER goto retry
+    set "P_USR="
+    set "P_PWD="
+    set /p "P_USR=Username: "
+    set /p "P_PWD=Password: "
 
     echo.
-    echo Retrying with credentials for %PXE_USER%...
-    net use Z: \\\\{server_ip}\\WinPXE_ISOs "%PXE_PASS%" /user:"%PXE_USER%"
+    echo Retrying with credentials for %P_USR%...
+    net use Z: "\\\\{server_ip}\\WinPXE_ISOs" "%P_PWD%" /user:"%P_USR%"
 )
 
 if errorlevel 1 (
     echo.
-    echo [!] Connection failed again.
+    echo [!] Connection FAILED.
     echo.
     echo Troubleshooting:
-    echo 1. Is the Host Network Profile 'Private'?
-    echo 2. Is 'File and Printer Sharing' allowed in Firewall?
-    echo 3. Are the credentials correct?
+    echo 1. Host Network Profile must be 'Private'.
+    echo 2. Firewall must allow 'File and Printer Sharing'.
     echo.
-    echo [P] Pause and keep window open for debugging
-    echo [R] Retry now
-    set /p "CHOICE=Choice (P/R): "
-    if /i "%CHOICE%"=="P" (
+    echo Press [E] for Emergency Shell, or any other key to Retry.
+    set "CHO="
+    set /p "CHO=Choice: "
+    if /i "%CHO%"=="E" (
         echo.
-        echo Entering Debug Shell. Type 'exit' to return to retry loop.
-        cmd /k
+        echo Type 'exit' to return to script.
+        cmd.exe
     )
     goto retry
 )
 
 echo.
-echo [OK] Connected to server successfully.
-echo [OK] Searching for Setup for {iso}...
+echo [OK] Connected! Searching for setup.exe...
 if exist "Z:\\extracted\\{safe_name}\\setup.exe" (
+    echo [OK] Launching installer...
     Z:\\extracted\\{safe_name}\\setup.exe
 ) else (
-    echo [!] FATAL ERROR: setup.exe not found at Z:\\extracted\\{safe_name}\\setup.exe
-    echo Listing Z:\\extracted for debugging:
-    dir Z:\\extracted
-    echo.
-    echo Staying in debug shell...
-    cmd /k
+    echo [!] ERROR: setup.exe not found!
+    echo Listing content of Z:\\extracted\\{safe_name}:
+    dir Z:\\extracted\\{safe_name}
 )
+
+echo.
+echo --------------------------------------------------------
+echo SCRIPT FINISHED OR CRASHED.
+echo Window stays open for debugging.
+echo --------------------------------------------------------
+cmd.exe /k
 """
             script_path = os.path.join(extract_base, safe_name, "winpxe_startup.bat")
-            with open(script_path, "w") as f:
+            with open(script_path, "w", encoding="ascii", errors="ignore") as f:
                 f.write(startup_script)
 
             # Generate winpeshl.ini to trigger the script
-            # Note: winpeshl.ini looks for apps in Windows\System32 by default
-            # We will inject our script there.
-            ini_content = f'[LaunchApps]\n"X:\\Windows\\System32\\winpxe_startup.bat"\n'
+            # We use the most explicit way to launch it.
+            ini_content = f'[LaunchApps]\n"X:\\Windows\\System32\\cmd.exe", "/k X:\\Windows\\System32\\winpxe_startup.bat"\n'
             ini_path = os.path.join(extract_base, safe_name, "winpeshl.ini")
-            with open(ini_path, "w") as f:
+            with open(ini_path, "w", encoding="ascii", errors="ignore") as f:
                 f.write(ini_content)
 
             ext_dir = f"http://{server_ip}:{http_port}/netboot/extracted/{safe_name}"
