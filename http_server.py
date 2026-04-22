@@ -72,38 +72,67 @@ echo ========================================================
 echo   WinPXE Automated Windows Installation
 echo ========================================================
 echo.
-echo Waiting for network initialization...
+echo [1/3] Initializing network stack (wpeinit)...
 wpeinit
+echo Waiting 15 seconds for DHCP...
+ping -n 16 127.0.0.1 >nul
 
+echo.
+echo [2/3] Network Diagnostics:
+ipconfig | find "IPv4"
+if errorlevel 1 (
+    echo [!] No IPv4 address detected!
+    echo     Check your DHCP server or network cable.
+)
+
+:wait_for_server
+echo Checking connectivity to server {server_ip}...
+ping -n 1 {server_ip} >nul
+if errorlevel 1 (
+    echo [!] Server {server_ip} is NOT reachable.
+    echo     Retrying in 5 seconds (Ctrl+C to cancel)...
+    ping -n 6 127.0.0.1 >nul
+    goto wait_for_server
+)
+echo [OK] Server {server_ip} is reachable.
+
+echo.
+echo [3/3] Mounting SMB share: \\\\{server_ip}\\WinPXE_ISOs
 :retry
-echo Attempting to mount SMB share: \\\\{server_ip}\\WinPXE_ISOs
-net use Z: \\\\{server_ip}\\WinPXE_ISOs >nul 2>&1
+echo Attempting Anonymous connection (Guest)...
+net use Z: \\\\{server_ip}\\WinPXE_ISOs /user:Guest "" >nul 2>&1
 
 if errorlevel 1 (
     echo.
-    echo [!] Failed to connect to server (Error Code: %errorlevel%).
+    echo [!] Anonymous connection failed (Error Code: %errorlevel%).
     echo.
-    echo If 'Password Protected Sharing' is enabled, please enter your credentials.
+    echo If 'Password Protected Sharing' is enabled on the server host,
+    echo you MUST enter valid Windows credentials for that machine.
+    echo.
     set /p "PXE_USER=Username: "
     set /p "PXE_PASS=Password: "
 
-    echo Retrying with credentials...
-    net use Z: \\\\{server_ip}\\WinPXE_ISOs "%PXE_PASS%" /user:"%PXE_USER%" >nul 2>&1
+    echo.
+    echo Retrying with credentials for %PXE_USER%...
+    net use Z: \\\\{server_ip}\\WinPXE_ISOs "%PXE_PASS%" /user:"%PXE_USER%"
 )
 
 if errorlevel 1 (
     echo.
-    echo [!] Still failed to connect. Retrying in 5 seconds...
+    echo [!] Connection failed again.
     echo.
-    echo     Debugging Tips:
-    echo     - Ensure the host firewall allows File and Printer Sharing.
-    echo     - Ensure the host network profile is set to 'Private'.
+    echo Troubleshooting:
+    echo 1. Is the Host Network Profile 'Private'?
+    echo 2. Is 'File and Printer Sharing' allowed in Firewall?
+    echo 3. Are the credentials correct?
     echo.
-    ping -n 6 127.0.0.1 >nul
+    echo Retrying in 10 seconds...
+    ping -n 11 127.0.0.1 >nul
     goto retry
 )
 
-echo [OK] Connected to server.
+echo.
+echo [OK] Connected to server successfully.
 echo [OK] Launching Setup for {iso}...
 Z:\\extracted\\{safe_name}\\setup.exe
 """

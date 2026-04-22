@@ -130,8 +130,10 @@ def main():
     logger.info(f"SMB Share Path: \\\\{server_ip}\\WinPXE_ISOs")
     logger.info("---")
     logger.info("IMPORTANT FOR WINDOWS INSTALLATION:")
-    logger.info("If 'Password protected sharing' is ON on this PC, you will be prompted")
-    logger.info("for your Windows credentials (username and password) during the installation.")
+    logger.info("If the installation hangs or fails to mount the share:")
+    logger.info("1. Ensure your Network Profile is set to 'Private' (not Public).")
+    logger.info("2. Ensure Windows Firewall allows 'File and Printer Sharing'.")
+    logger.info("3. If 'Password protected sharing' is ON, enter your credentials in WinPE.")
     logger.info("---")
     logger.info("Ready for client connections. Press Ctrl+C to stop.")
 
