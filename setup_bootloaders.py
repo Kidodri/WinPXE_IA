@@ -28,14 +28,19 @@ def download_file(url, dest):
 
 def ensure_bootloaders():
     os.makedirs("netboot", exist_ok=True)
+
+    # We use a custom-built ipxe.efi with USB_HCD_USBIO enabled for better keyboard support.
+    # We only download it if it's missing.
     files = {
-        "netboot/ipxe.efi": "https://boot.ipxe.org/x86_64-efi/ipxe.efi",
+        "netboot/ipxe.efi": "https://boot.ipxe.org/x86_64-efi/ipxe.efi", # Fallback URL
         "netboot/wimboot": "https://github.com/ipxe/wimboot/releases/latest/download/wimboot"
     }
 
     for dest, url in files.items():
         if not os.path.exists(dest):
             logger.info(f"Bootloader '{dest}' missing.")
+            # Note: For ipxe.efi, the user is expected to use the custom build provided in the repo.
+            # If missing, we fallback to the official build.
             download_file(url, dest)
         else:
             logger.info(f"Bootloader '{dest}' is already present.")

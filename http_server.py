@@ -33,11 +33,8 @@ def generate_ipxe_menu(iso_dir, server_ip, http_port):
     extract_base = "netboot/extracted"
 
     menu = "#!ipxe\n\n"
-    # Try to initialize USB keyboard and give it a second
-    menu += "usb-keyboard ||\n"
-    menu += "sleep 1\n"
-    # Ensure console is initialized, can help with keyboard issues
-    menu += "console\n"
+    # Note: We avoid 'usb-keyboard' and 'console' commands as they can conflict
+    # with native UEFI firmware drivers and cause keyboard hangs.
     menu += "set menu-timeout 30000\n"
     menu += "set menu-default iso_0\n\n"
 
@@ -46,11 +43,13 @@ def generate_ipxe_menu(iso_dir, server_ip, http_port):
     menu += "item --gap --             ------------------------- ISO Images -------------------------\n"
 
     for i, iso in enumerate(isos):
-        menu += f"item iso_{i} {iso}\n"
+        # Add numeric hotkeys for the first 10 ISOs
+        key = f" --key {i}" if i < 10 else ""
+        menu += f"item{key} iso_{i} {iso}\n"
 
     menu += "item --gap --             ------------------------- Settings ---------------------------\n"
-    menu += "item shell iPXE shell\n"
-    menu += "item exit  Exit and continue booting\n\n"
+    menu += "item --key s shell iPXE shell\n"
+    menu += "item --key x exit  Exit and continue booting\n\n"
 
     menu += "choose --timeout ${menu-timeout} --default ${menu-default} target && goto ${target}\n\n"
 
@@ -66,6 +65,7 @@ def generate_ipxe_menu(iso_dir, server_ip, http_port):
             logger.info(f"Generating automated wimboot entry for {iso}")
 
             # Generate the startup script for this ISO
+            # We use 'ping' instead of 'timeout' because 'timeout' is often missing in WinPE
             startup_script = f"""@echo off
 echo ========================================================
 echo   WinPXE Automated Windows Installation
@@ -76,12 +76,29 @@ wpeinit
 
 :retry
 echo Attempting to mount SMB share: \\\\{server_ip}\\WinPXE_ISOs
-net use Z: \\\\{server_ip}\\WinPXE_ISOs /user:Guest "" >nul 2>&1
+net use Z: \\\\{server_ip}\\WinPXE_ISOs >nul 2>&1
+
 if errorlevel 1 (
     echo.
-    echo [!] Failed to connect to server. Retrying in 5 seconds...
-    echo     Tip: Ensure 'Password protected sharing' is OFF on the server.
-    timeout /t 5 >nul
+    echo [!] Failed to connect to server (Error Code: %errorlevel%).
+    echo.
+    echo If 'Password Protected Sharing' is enabled, please enter your credentials.
+    set /p "PXE_USER=Username: "
+    set /p "PXE_PASS=Password: "
+
+    echo Retrying with credentials...
+    net use Z: \\\\{server_ip}\\WinPXE_ISOs "%PXE_PASS%" /user:"%PXE_USER%" >nul 2>&1
+)
+
+if errorlevel 1 (
+    echo.
+    echo [!] Still failed to connect. Retrying in 5 seconds...
+    echo.
+    echo     Debugging Tips:
+    echo     - Ensure the host firewall allows File and Printer Sharing.
+    echo     - Ensure the host network profile is set to 'Private'.
+    echo.
+    ping -n 6 127.0.0.1 >nul
     goto retry
 )
 
