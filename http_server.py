@@ -33,13 +33,14 @@ def generate_ipxe_menu(iso_dir, server_ip, http_port):
     extract_base = "netboot/extracted"
 
     menu = "#!ipxe\n\n"
-    # Note: We avoid 'usb-keyboard' and 'console' commands as they can conflict
-    # with native UEFI firmware drivers and cause keyboard hangs.
+    # Ensure console is in a clean state. We avoid 'usb-keyboard' as it
+    # conflicts with native UEFI drivers.
+    menu += "console --keep\n"
     menu += "set menu-timeout 30000\n"
     menu += "set menu-default iso_0\n\n"
 
     menu += ":start\n"
-    menu += "menu WinPXE Boot Menu\n"
+    menu += "menu WinPXE Boot Menu (Use number keys 0-9 if arrows fail)\n"
     menu += "item --gap --             ------------------------- ISO Images -------------------------\n"
 
     for i, iso in enumerate(isos):
