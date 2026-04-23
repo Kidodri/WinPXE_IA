@@ -1,6 +1,9 @@
 from pypxe import tftp
 import threading
 import os
+import logging
+
+logger = logging.getLogger("WinPXE-Server")
 
 class TFTPServer:
     def __init__(self, ip, port=69, netboot_dir="netboot"):
@@ -11,7 +14,7 @@ class TFTPServer:
         self.thread = None
 
     def start(self):
-        print(f"Starting TFTP Server on {self.ip}:{self.port} serving {self.netboot_dir}...")
+        logger.info(f"Starting TFTP Server on {self.ip}:{self.port} serving {self.netboot_dir}...")
         self.server = tftp.TFTPD(ip=self.ip, port=self.port, netboot_directory=self.netboot_dir)
         self.thread = threading.Thread(target=self.server.listen)
         self.thread.daemon = True

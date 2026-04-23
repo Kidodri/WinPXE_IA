@@ -2,6 +2,7 @@ __pycache__/
 *.pyc
 netboot/ipxe.efi
 netboot/wimboot
+netboot/wimboot.efi
 netboot/boot.ipxe
 isos/*
 !isos/.gitkeep
