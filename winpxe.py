@@ -58,8 +58,9 @@ def setup_smb_share(iso_dir):
     # 1. Apply NTFS permissions (Icacls)
     # We use the SID *S-1-1-0 for Everyone to be language-independent in icacls
     # (OI)(CI)R = Object Inherit, Container Inherit, Read
-    logger.info(f"Ensuring NTFS read permissions for {everyone_name} (SID: *S-1-1-0)...")
-    result = subprocess.run(["icacls", abs_path, "/grant:r", "*S-1-1-0:(OI)(CI)R"], capture_output=True)
+    # /T = Recursive (important for extracted ISO content)
+    logger.info(f"Ensuring NTFS read permissions for {everyone_name} (SID: *S-1-1-0) recursively...")
+    result = subprocess.run(["icacls", abs_path, "/grant:r", "*S-1-1-0:(OI)(CI)R", "/T"], capture_output=True)
     if result.returncode != 0:
         logger.warning(f"Icacls warning: {result.stderr.decode('cp850', errors='replace').strip()}")
 

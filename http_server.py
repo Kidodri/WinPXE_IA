@@ -111,10 +111,8 @@ if errorlevel 1 (
     echo [!] SMB Mount FAILED with error code %errorlevel%.
     echo     If 'Password Protected Sharing' is ON, enter credentials:
     echo.
-    set "P_USR="
-    set "P_PWD="
-    set /p "P_USR=Username (e.g. your Windows login): "
-    set /p "P_PWD=Password: "
+    set /p P_USR=Username (e.g. your Windows login):
+    set /p P_PWD=Password:
 
     echo.
     echo Retrying with credentials for %P_USR%...
