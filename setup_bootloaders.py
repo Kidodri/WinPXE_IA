@@ -30,20 +30,17 @@ def ensure_bootloaders():
     os.makedirs("netboot", exist_ok=True)
 
     # We use a custom-built ipxe.efi with USB_HCD_USBIO enabled for better keyboard support.
-    # We only download it if it's missing.
+    # We download them as .efi files to ensure UEFI firmware recognizes them correctly.
     files = {
-        "netboot/ipxe.efi": "https://boot.ipxe.org/x86_64-efi/ipxe.efi", # Fallback URL
-        "netboot/wimboot": "https://github.com/ipxe/wimboot/releases/latest/download/wimboot"
+        "netboot/ipxe.efi": "https://boot.ipxe.org/x86_64-efi/ipxe.efi",
+        "netboot/wimboot.efi": "https://github.com/ipxe/wimboot/releases/latest/download/wimboot"
     }
 
     for dest, url in files.items():
-        if not os.path.exists(dest):
-            logger.info(f"Bootloader '{dest}' missing.")
-            # Note: For ipxe.efi, the user is expected to use the custom build provided in the repo.
-            # If missing, we fallback to the official build.
-            download_file(url, dest)
-        else:
-            logger.info(f"Bootloader '{dest}' is already present.")
+        # Force download to ensure we have the latest version with standard commands (like 'pause' or 'prompt')
+        # and to transition from extensionless 'wimboot' to 'wimboot.efi'.
+        logger.info(f"Ensuring bootloader '{dest}' is present and up-to-date...")
+        download_file(url, dest)
 
 if __name__ == "__main__":
     ensure_bootloaders()

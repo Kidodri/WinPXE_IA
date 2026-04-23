@@ -169,7 +169,8 @@ cmd.exe /k
 
             ext_dir = f"http://{server_ip}:{http_port}/netboot/extracted/{safe_name}"
             menu += "echo Optimized Windows Boot detected (Automated)...\n"
-            menu += f"kernel http://{server_ip}:{http_port}/netboot/wimboot\n"
+            # Using .efi extension to ensure UEFI firmware recognition
+            menu += f"kernel http://{server_ip}:{http_port}/netboot/wimboot.efi\n"
             menu += f"initrd {ext_dir}/bootmgfw.efi bootmgfw.efi\n"
             menu += f"initrd {ext_dir}/bcd bcd\n"
             menu += f"initrd {ext_dir}/boot.sdi boot.sdi\n"
@@ -178,9 +179,8 @@ cmd.exe /k
             menu += f"initrd {ext_dir}/winpeshl.ini Windows/System32/winpeshl.ini\n"
             menu += f"initrd {ext_dir}/winpxe_startup.bat Windows/System32/winpxe_startup.bat\n"
             menu += "imgstat\n"
-            menu += "echo Images loaded. Press any key to boot...\n"
-            menu += "pause\n"
-            menu += "sleep 1\n"
+            # 'pause' is sometimes missing in basic iPXE builds; 'prompt' is more reliable.
+            menu += "prompt --key 0x0d Images loaded. Press [Enter] to boot...\n"
             menu += "boot\n"
         else:
             if "win" in iso.lower():
