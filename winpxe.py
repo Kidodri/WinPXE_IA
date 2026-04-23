@@ -3,8 +3,6 @@ import sys
 import time
 import subprocess
 import logging
-import secrets
-import string
 from interface_selector import select_interface
 from proxydhcp import ProxyDHCP
 from tftp_server import TFTPServer

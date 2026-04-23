@@ -66,55 +66,54 @@ def generate_ipxe_menu(iso_dir, server_ip, http_port):
             logger.info(f"Generating automated wimboot entry for {iso}")
 
             # Generate the startup script for this ISO
-            # We use 'ping' instead of 'timeout' because 'timeout' is often missing in WinPE
             startup_script = f"""@echo off
 echo.
 echo ========================================================
-echo   WinPXE Automated Windows Installation
+echo   WinPXE Automated Windows Installation (v2)
 echo ========================================================
 echo.
-echo [DEBUG] Target Server: {server_ip}
+echo [DEBUG] Server IP: {server_ip}
 echo [DEBUG] Target ISO: {iso}
 echo.
-echo [STEP 1] Initializing network...
+echo [STEP 1] Initializing network (wpeinit)...
 wpeinit
-echo Waiting 15 seconds for network...
-ping -n 16 127.0.0.1 >nul
 
-echo.
-echo [STEP 2] Network Config:
-ipconfig
-echo.
-echo If no IP address is shown, drivers are missing or DHCP failed.
-echo Press any key to continue...
-pause
+:check_ip
+echo [STEP 2] Verifying Network Configuration...
+ipconfig | find "IPv4 Address"
+if errorlevel 1 (
+    echo [!] No IP address detected yet. Waiting 5 seconds...
+    ping -n 6 127.0.0.1 >nul
+    goto check_ip
+)
 
 :wait_for_server
-echo.
-echo Checking connectivity to {server_ip}...
+echo [STEP 3] Testing connectivity to server {server_ip}...
 ping -n 1 {server_ip} >nul
 if errorlevel 1 (
     echo [!] Server {server_ip} is NOT reachable.
-    echo     Check cables and Firewall on Host.
+    echo     - Is the Windows Firewall on the Host blocking ICMP/SMB?
+    echo     - Is the Host Network Profile set to 'Private'?
     echo     Retrying in 5 seconds...
     ping -n 6 127.0.0.1 >nul
     goto wait_for_server
 )
 echo [OK] Server is reachable.
 
-:retry
+:retry_mount
 echo.
-echo [STEP 3] Mounting SMB share: \\\\{server_ip}\\WinPXE_ISOs
-net use Z: "\\\\{server_ip}\\WinPXE_ISOs" /user:Guest "" >nul 2>&1
+echo [STEP 4] Mounting SMB share: \\\\{server_ip}\\WinPXE_ISOs
+echo Attempting Guest login...
+net use Z: "\\\\{server_ip}\\WinPXE_ISOs" /user:Guest ""
 
 if errorlevel 1 (
     echo.
-    echo [!] Anonymous connection failed.
+    echo [!] SMB Mount FAILED with error code %errorlevel%.
     echo     If 'Password Protected Sharing' is ON, enter credentials:
     echo.
     set "P_USR="
     set "P_PWD="
-    set /p "P_USR=Username: "
+    set /p "P_USR=Username (e.g. your Windows login): "
     set /p "P_PWD=Password: "
 
     echo.
@@ -124,7 +123,7 @@ if errorlevel 1 (
 
 if errorlevel 1 (
     echo.
-    echo [!] Connection FAILED.
+    echo [!] Connection still FAILED.
     echo.
     echo Troubleshooting:
     echo 1. Host Network Profile must be 'Private'.
@@ -138,7 +137,7 @@ if errorlevel 1 (
         echo Type 'exit' to return to script.
         cmd.exe
     )
-    goto retry
+    goto retry_mount
 )
 
 echo.
@@ -180,6 +179,10 @@ cmd.exe /k
             # Injecting into Windows/System32 allows WinPE to find them automatically
             menu += f"initrd {ext_dir}/winpeshl.ini Windows/System32/winpeshl.ini\n"
             menu += f"initrd {ext_dir}/winpxe_startup.bat Windows/System32/winpxe_startup.bat\n"
+            menu += "imgstat\n"
+            menu += "echo Images loaded. Press any key to boot...\n"
+            menu += "pause\n"
+            menu += "sleep 1\n"
             menu += "boot\n"
         else:
             if "win" in iso.lower():
