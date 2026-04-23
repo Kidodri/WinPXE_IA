@@ -71,19 +71,19 @@ try {{
 
     # Priority for bootmgfw.efi: sources/bootmgfw.efi is often more reliable for iPXE/wimboot than efi/boot/bootx64.efi
     $bootmgfwSource = ""
-    if (Test-Path (Join-Path $drivePath "sources/bootmgfw.efi")) {
+    if (Test-Path (Join-Path $drivePath "sources/bootmgfw.efi")) {{
         $bootmgfwSource = Join-Path $drivePath "sources/bootmgfw.efi"
-    } elseif (Test-Path (Join-Path $drivePath "efi/boot/bootx64.efi")) {
+    }} elseif (Test-Path (Join-Path $drivePath "efi/boot/bootx64.efi")) {{
         $bootmgfwSource = Join-Path $drivePath "efi/boot/bootx64.efi"
-    }
+    }}
 
-    if ($bootmgfwSource) {
+    if ($bootmgfwSource) {{
         $destFile = Join-Path $targetDir "bootmgfw.efi"
         Write-Host "Copying $bootmgfwSource to $destFile"
         Copy-Item -Path $bootmgfwSource -Destination $destFile -Force
-    } else {
+    }} else {{
         Write-Warning "Required file not found on ISO: bootmgfw.efi (checked sources/ and efi/boot/)"
-    }
+    }}
 
     $filesToCopy = @(
         "boot/bcd",

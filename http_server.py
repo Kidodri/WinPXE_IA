@@ -105,19 +105,18 @@ echo.
 echo [STEP 4] Mounting SMB share: \\\\{server_ip}\\WinPXE_ISOs
 echo Attempting Guest login...
 net use Z: "\\\\{server_ip}\\WinPXE_ISOs" /user:Guest ""
+if not errorlevel 1 goto mount_success
 
-if errorlevel 1 (
-    echo.
-    echo [!] SMB Mount FAILED with error code %errorlevel%.
-    echo     If 'Password Protected Sharing' is ON, enter credentials:
-    echo.
-    set /p P_USR=Username (e.g. your Windows login):
-    set /p P_PWD=Password:
+echo.
+echo [!] SMB Mount FAILED with error code %errorlevel%.
+echo     If 'Password Protected Sharing' is ON, enter credentials:
+echo.
+set /p P_USR=Username (e.g. your Windows login):
+set /p P_PWD=Password:
 
-    echo.
-    echo Retrying with credentials for %P_USR%...
-    net use Z: "\\\\{server_ip}\\WinPXE_ISOs" "%P_PWD%" /user:"%P_USR%"
-)
+echo.
+echo Retrying with credentials for %P_USR%...
+net use Z: "\\\\{server_ip}\\WinPXE_ISOs" "%P_PWD%" /user:"%P_USR%"
 
 if errorlevel 1 (
     echo.
@@ -138,6 +137,7 @@ if errorlevel 1 (
     goto retry_mount
 )
 
+:mount_success
 echo.
 echo [OK] Connected! Searching for setup.exe...
 if exist "Z:\\extracted\\{safe_name}\\setup.exe" (
